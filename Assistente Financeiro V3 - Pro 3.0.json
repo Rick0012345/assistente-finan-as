@@ -1,0 +1,584 @@
+{
+  "name": "Assistente Financeiro V3 - Pro",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.messages[0].text.body }}",
+        "options": {
+          "systemMessage": "Hoje é {{ $now.format('yyyy-MM-dd') }}.\n\nVocê é um assistente financeiro simpático.\n⚠️ IMPORTANTE: O registro dos gastos está sendo feito por um sistema automático em paralelo. Você NÃO precisa inserir nada.\n\nSUA ÚNICA FUNÇÃO AGORA É:\n1. Ser simpático quando o usuário informar um gasto.\n2. Consultar dados APENAS quando o usuário perguntar explicitamente (ex: \"quanto gastei?\").\n\n⛔ REGRAS DE BLOQUEIO (LEIA COM ATENÇÃO):\n\nCASO 1: O usuário diz \"Gastei X\", \"Comprei Y\", \"Paguei Z\"\n- AÇÃO: Responda APENAS com uma confirmação curta.\n- PROIBIDO: 🚫 JAMAIS chame a ferramenta \"CONSULTAR O BANCO\" neste caso. Não verifique o saldo. Não verifique se caiu.\n- RESPOSTA PADRÃO: \"Combinado! Já está anotado. ✅\" ou \"Beleza, registrei aqui! 👊\"\n\nCASO 2: O usuário pergunta \"Resumo\", \"Relatório\", \"Quanto gastei?\"\n- AÇÃO: Agora sim, use a ferramenta \"CONSULTAR O BANCO\".\n- RESPOSTA: Agrupe os gastos por categoria e mostre o total.\n\nResumo: Se for INPUT de dinheiro, NÃO consulte o banco. Acredite cegamente que o sistema paralelo funcionou."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1728,
+        944
+      ],
+      "id": "92f13f26-e46a-44e6-92dc-7a5ee8a28f48",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1616,
+        1200
+      ],
+      "id": "a838d8e3-211e-4463-825a-fa040396edf2",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "UkBDilJROczeGw7e",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Use esta ferramenta para consultar despesas. Tabela: transacoes.",
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "transacoes"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        2032,
+        1232
+      ],
+      "id": "621a2ae7-ab85-4b3a-bc6f-8f35cc9b7931",
+      "name": "CONSULTAR O BANCO",
+      "credentials": {
+        "postgres": {
+          "id": "bV2NXDp0Xrl9LjsI",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        1440
+      ],
+      "id": "026098a3-01f5-487f-8bfe-46cf11a44c7a",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Habilita a extensão para gerar UUIDs\nCREATE EXTENSION IF NOT EXISTS \"pgcrypto\";\n\n-- 2. Tabela de Usuários\nCREATE TABLE IF NOT EXISTS usuarios (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    canal_origem VARCHAR(50) NOT NULL,\n    id_externo VARCHAR(255) NOT NULL,\n    nome_exibicao VARCHAR(255),\n    criado_em TIMESTAMPTZ DEFAULT NOW(),\n    UNIQUE(canal_origem, id_externo)\n);\n\n-- 3. INSERE O USUÁRIO DE TESTE (CRUCIAL PARA O AGENTE)\nINSERT INTO usuarios (id, canal_origem, id_externo, nome_exibicao)\nVALUES ('00000000-0000-0000-0000-000000000000', 'teste', 'teste_chat', 'Usuario Teste')\nON CONFLICT (canal_origem, id_externo) DO NOTHING;\n\n-- 4. Tabela de Transações\nCREATE TABLE IF NOT EXISTS transacoes (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,\n    valor NUMERIC(12, 2) NOT NULL,\n    tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('entrada', 'saida')), \n    data_ref TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    categoria_sugerida VARCHAR(100),\n    meta_dados JSONB DEFAULT '{}'::jsonb, \n    criado_em TIMESTAMPTZ DEFAULT NOW()\n);\n\n-- 5. Criação de Índices\nCREATE INDEX IF NOT EXISTS idx_transacoes_usuario ON transacoes(usuario_id);\nCREATE INDEX IF NOT EXISTS idx_transacoes_data ON transacoes(data_ref);\n\n-- 6. View de Analítica\nCREATE OR REPLACE VIEW view_resumo_diario AS\nSELECT \n    usuario_id,\n    DATE(data_ref) as dia,\n    categoria_sugerida,\n    COUNT(*) as qtd_transacoes,\n    SUM(valor) as total_gasto\nFROM transacoes\nWHERE tipo = 'saida'\nGROUP BY usuario_id, DATE(data_ref), categoria_sugerida;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1776,
+        1440
+      ],
+      "id": "80084240-c1b6-4161-a211-3adf4e7bf742",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "bV2NXDp0Xrl9LjsI",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "mensagem",
+              "value": "={{ $json.messages[0].text.body }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "184469d4-83e9-4ad2-9b91-58bbc744c4e9",
+      "name": "Preparar Mensagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1904,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.mensagem }}",
+        "attributes": {
+          "attributes": [
+            {
+              "name": "valor",
+              "type": "number",
+              "description": "Valor numérico da despesa em reais. Converta gírias como conto, pila, pau para números (ex: 50 conto = 50.00)"
+            },
+            {
+              "name": "categoria_sugerida",
+              "description": "Categoria da despesa: Alimentação, Transporte, Vestuário, Lazer, Saúde, Moradia, Educação, ou Outros"
+            },
+            {
+              "name": "descricao",
+              "description": "Descrição do item comprado ou serviço pago"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "38d54f59-21a6-4d24-ba6b-0d3bd4191300",
+      "name": "Extrair Dados da Despesa",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        2112,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "usuario_id",
+              "value": "00000000-0000-0000-0000-000000000000",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "valor",
+              "value": "={{ $json.output.valor ?? 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "id-3",
+              "name": "tipo",
+              "value": "saida",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "categoria_sugerida",
+              "value": "={{ $json.output.categoria_sugerida ?? \"Outros\" }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "meta_dados",
+              "value": "={{ JSON.stringify({ \"descricao\": $json.output.descricao }) }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "31381251-1422-4dd5-80c9-e499789b8471",
+      "name": "Preparar Campos DB",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2432,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "name",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "name",
+          "value": "transacoes"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "usuario_id": "={{ $json.usuario_id }}",
+            "valor": "={{ $json.valor }}",
+            "tipo": "={{ $json.tipo }}",
+            "categoria_sugerida": "={{ $json.categoria_sugerida }}",
+            "meta_dados": "={{ $json.meta_dados }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "usuario_id",
+              "displayName": "usuario_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "valor",
+              "displayName": "valor",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_ref",
+              "displayName": "data_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "categoria_sugerida",
+              "displayName": "categoria_sugerida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "meta_dados",
+              "displayName": "meta_dados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criado_em",
+              "displayName": "criado_em",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "12a35a6a-4e73-4510-8f08-0f405536b128",
+      "name": "Inserir no Banco",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2624,
+        784
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "bV2NXDp0Xrl9LjsI",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "f51de290-c95e-4c5e-ad65-98a6d586a506",
+      "name": "OpenAI Model para Extração",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2384,
+        960
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "UkBDilJROczeGw7e",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        1856,
+        1216
+      ],
+      "id": "c0c26fa5-bd9e-41a5-817e-96a3b42caa1b",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "bV2NXDp0Xrl9LjsI",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {
+          "messageStatusUpdates": [
+            "all"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        816
+      ],
+      "id": "a382f4fe-ac4f-4b26-8062-5d5ade456e29",
+      "name": "WhatsApp Trigger",
+      "webhookId": "b6d5af8e-c681-485c-a908-66e00a629386",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "FrJOcerVjunwA7oB",
+          "name": "WhatsApp OAuth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        2160,
+        1024
+      ],
+      "id": "6d82939d-b7ca-4991-8c3d-23107f460bf7",
+      "name": "Send message",
+      "webhookId": "38e5b62a-412d-4cb8-b70d-f3498bbfc44d",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2neQX3azdVnlZi32",
+          "name": "WhatsApp account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "WhatsApp Trigger": [
+      {
+        "json": {
+          "messaging_product": "whatsapp",
+          "metadata": {
+            "display_phone_number": "15551791204",
+            "phone_number_id": "740050119202275"
+          },
+          "contacts": [
+            {
+              "profile": {
+                "name": "Daniel Alvarez"
+              },
+              "wa_id": "5521969547552"
+            }
+          ],
+          "messages": [
+            {
+              "from": "5521969547552",
+              "id": "wamid.HBgNNTUyMTk2OTU0NzU1MhUCABIYFjNFQjA4RUE4M0YzMkNCNTlDQzY2QkEA",
+              "timestamp": "1762519850",
+              "text": {
+                "body": "comprei um notebook de 3000"
+              },
+              "type": "text"
+            }
+          ],
+          "field": "messages"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONSULTAR O BANCO": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Extrair Dados da Despesa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Model para Extração": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extrair Dados da Despesa",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Dados da Despesa": {
+      "main": [
+        [
+          {
+            "node": "Preparar Campos DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Campos DB": {
+      "main": [
+        [
+          {
+            "node": "Inserir no Banco",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Preparar Mensagem",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c69359c9-14c0-4a77-8a35-0008c7dd5ae6",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7d2689d3981dbb82aa6472cad37dec64e6149713c563c2747108f1e1d142702a"
+  },
+  "id": "TTd76pZOkDWoQXaj",
+  "tags": []
+}
